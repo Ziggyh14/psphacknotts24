@@ -14,7 +14,7 @@
 #define FOV 100
 
 #define CHUNK_SIZE 100
-#define BUFFER_CHUNKS 16
+#define BUFFER_CHUNKS 5
 
 #define LANES 3
 
@@ -40,7 +40,7 @@
 #define BRAKE -1
 #define DECEL 0
 
-#define CENTRIFUGAL 0.5
+#define CENTRIFUGAL 0.3
 
 #define easeIn(a,b,p) (a+(b-a)*powf(p,2))
 #define easeOut(a,b,p) (a+(b-a)*(1-powf(1-p,2)))
@@ -50,6 +50,7 @@
 
 int colours_DARK[PALETTE_SIZE] = {0xff2fa31d,0xff667064,0xffffffff,0xffffffff};
 int colours_LIGHT[PALETTE_SIZE] = {0xff3edb25,0xff667064,0xff0000ff,0xff667064};
+int colours_CHECKPOINT[PALETTE_SIZE] = {0xff3edb25,0xff002afa,0xff0000ff,0xff667064};
 
 typedef struct vec3{
 
@@ -89,11 +90,13 @@ typedef struct segment{
     sprite sprites[5];
     int spritenum;
     float clip;
+    float timeadded;
+    int checkpoint;
 
 }segment;
 
 
-segment road_segments[CHUNK_SIZE*BUFFER_CHUNKS];
+segment road_segments[CHUNK_SIZE*10000];
 int chunk_index= 0;
 int road_len = 0;
 int trackLen = 0;
@@ -101,6 +104,7 @@ float position = 0;
 float cam_depth;
 float playerX = 0;
 float playerZ = 0;
+float playerW = 0;
 float speed = 0;
 float max_speed = (SEGMENT_LEN/0.0166666);
 
@@ -143,10 +147,10 @@ void addSprite(int segi,SDL_Texture* t,float offset){
     }
 }
 
-void addSegment(int c,float y){
+void addSegment(int c,float y,int i){
     
     segment s;
-    s.index = road_len;
+    s.index = i;
     s.p1.world = zero;
     s.p1.world.y = lastY();
     s.p1.world.z = road_len*SEGMENT_LEN;
@@ -156,33 +160,47 @@ void addSegment(int c,float y){
     s.c = c;
     s.colours = ((road_len/RUMBLE_LEN)%2 ? colours_DARK : colours_LIGHT);
     s.spritenum = 0;
-    road_segments[road_len] = s;
+    s.checkpoint = 0;
+    road_segments[i] = s;
     road_len++;
 }
 
-void addRoad(float enter,float hold,float leave, int curve,float y){
+void addChunk(float enter,float hold,float leave, int curve,float y){
     
+    if(enter+hold+leave != 100){
+        return;
+    }
     float startY = lastY();
     float endY = startY + (y*SEGMENT_LEN);
     float total =enter+hold+leave;
     int i;
     for(i = 0;i<enter;i++){
-        addSegment(easeIn(0,curve,i/enter),easeInOut(startY,endY,(float)i/total));}
+        addSegment(easeIn(0,curve,i/enter),easeInOut(startY,endY,(float)i/total),(chunk_index*100)+i);}
     for(i = 0; i<hold;i++){
-        addSegment(curve,easeInOut(startY,endY,(enter+(float)i)/total));}
+        addSegment(curve,easeInOut(startY,endY,(enter+(float)i)/total),(chunk_index*100)+i+enter);}
     for(i = 0; i<leave;i++){
-        addSegment(easeInOut(curve,0,i/leave),easeInOut(startY,endY,(enter+hold+(float)i)/total));}
+        addSegment(easeInOut(curve,0,i/leave),easeInOut(startY,endY,(enter+hold+(float)i)/total),(chunk_index*100)+i+enter+hold);}
+    chunk_index = (chunk_index + 1);
     
 }
 
-void addSCurves(){
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_EASY,HILL_LOW);
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_HARD,HILL_HIGH);
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_HARD,HILL_LOW);
+void addGenRoad(){
 
-     trackLen = road_len * SEGMENT_LEN;
+    for(int i = 0; i<5000;i++){
+        addChunk(LEN_MEDIUM,LEN_SHORT,LEN_SHORT,CURVE_EASY,HILL_LOW);
+        addChunk(LEN_SHORT,LEN_MEDIUM,LEN_SHORT,-CURVE_MEDIUM,HILL_MEDIUM);
+    }
+
+    trackLen = road_len * SEGMENT_LEN;
+}
+
+void addCheckpoint(int i,float time_added){
+
+    segment* s = &road_segments[i];
+    s->colours = colours_CHECKPOINT;
+    s->checkpoint = 1;
+    s->timeadded = time_added;
+
 }
 
 void reset_road(){
@@ -213,6 +231,7 @@ segment find_segment(float z){
     return road_segments[(int)(z/SEGMENT_LEN) % road_len];
     
 }
+
 
 void project_point(point* p,int camx, int camy, int camz){
 
@@ -291,8 +310,8 @@ void render_background(SDL_Renderer* rend){
 
 void render_player(SDL_Renderer* rend){
     float bounce = (1.5 * (1/SDL_GetPerformanceCounter()) * speed/max_speed *(4/3));
-    
-    render_sprite(rend,car.t,(float)cam_depth/playerZ,WINDOW_WIDTH/2,WINDOW_HEIGHT,270,70,-0.5,-1,0);
+    playerW = (442*(float)cam_depth/playerZ*(float)WINDOW_WIDTH/2) * ((0.3 * 1/270) * ROAD_WIDTH);
+    render_sprite(rend,car.t,(float)cam_depth/playerZ,WINDOW_WIDTH/2,WINDOW_HEIGHT,442,304,-0.5,-1,0);
 }
 
 void render(SDL_Renderer* rend){
@@ -367,6 +386,10 @@ void render(SDL_Renderer* rend){
     SDL_RenderPresent(rend);
 }
 
+int overlap(x1,w1,x2,w2,p){
+
+}
+
 int main(int argc, char *argv[])
 {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
@@ -393,8 +416,9 @@ int main(int argc, char *argv[])
 
     cam_depth = 1 / ( tanf((FOV/2)/(180/M_PI)) );
      playerZ = (float)CAM_HEIGHT*cam_depth;
-    addSCurves();
-
+    addGenRoad();
+    addCheckpoint(100,100);
+   // printf("roads gened\n");
     addSprite(5,  billboard, -1);
     addSprite(60,  billboard, -1);
     addSprite(60,  billboard, 1);
@@ -405,6 +429,7 @@ int main(int argc, char *argv[])
     float drift_tightness = 0;
     float drift_factor = 0;
     float drift_angle = 0;
+    float time = 0;
     Uint64 NOW = SDL_GetPerformanceCounter();
     Uint64 LAST = 0;
     float dt = 0;
@@ -472,6 +497,12 @@ int main(int argc, char *argv[])
         segment playerSegment = find_segment(position+playerZ);
         position = increase(position,dt*speed,trackLen,0);
 
+        if(playerSegment.checkpoint){
+            time+=playerSegment.timeadded;
+            road_segments[playerSegment.index].checkpoint = 0;
+        }
+        printf("time: %f\n",time);
+
         
 
         float dx = dt * 2 * (speed/max_speed);
@@ -506,11 +537,24 @@ int main(int argc, char *argv[])
         if (((playerX < -1) || (playerX > 1)) && (speed > max_speed/4))
             speed = speed + (-max_speed/2* dt);
 
-        //player can drift by pressing X and counter steering agaisnt a curve.
+        if ((playerX < -1) || (playerX > 1)){
+            for(int n = 0 ; n < playerSegment.spritenum; n++) {
+                sprite s  = playerSegment.sprites[n];
+                int sw,sh;
+                SDL_QueryTexture(s.t,NULL,NULL,&sw,&sh);
+                if (overlap(playerX,playerW,s.offset+sw/2*(s.offset>0?1:-1),sw)) {
+                    //hitjkfhewgjn
+                }   
+            }
 
-        
+        }
 
-     
+        segment firstSegment = find_segment(position);
+        printf("firssegmetn: %d\n",firstSegment.index);
+        if((chunk_index+2)*100<firstSegment.index){
+            addChunk(LEN_SHORT,LEN_SHORT,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
+        }
+
         render(renderer);
 
 
