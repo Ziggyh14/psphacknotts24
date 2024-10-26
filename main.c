@@ -2,16 +2,20 @@
 #include <math.h>
 #include <stdio.h>
 #include <SDL2/SDL2_gfxPrimitives.h>
+#include <SDL2/SDL_image.h>
 #define PALETTE_SIZE 4
-#define SEGMENT_LEN 100
+#define SEGMENT_LEN 200
 #define RUMBLE_LEN 3
-#define WINDOW_WIDTH 480
-#define WINDOW_HEIGHT 272
-#define DRAW_DISTANCE 150
-#define ROAD_WIDTH 1000
-#define CAM_HEIGHT 2000
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
+#define DRAW_DISTANCE 300
+#define ROAD_WIDTH 2000
+#define CAM_HEIGHT 1000
 #define FOV 100
-#define SPEED 100
+
+#define CHUNK_SIZE 100
+#define BUFFER_CHUNKS 16
+
 #define LANES 3
 
 #define LEN_NONE 0
@@ -28,6 +32,15 @@
 #define HILL_LOW 20
 #define HILL_MEDIUM 40
 #define HILL_HIGH 60
+
+#define DIR_LEFT -1
+#define DIR_RIGHT 1
+
+#define ACCEL 1
+#define BRAKE -1
+#define DECEL 0
+
+#define CENTRIFUGAL 0.5
 
 #define easeIn(a,b,p) (a+(b-a)*powf(p,2))
 #define easeOut(a,b,p) (a+(b-a)*(1-powf(1-p,2)))
@@ -54,8 +67,17 @@ typedef struct point{
     vec3 world;
     vec3 camera;
     vec3 screen;
+    float screenscale;
 
 }point;
+
+typedef struct sprite{
+    SDL_Texture* t;
+   // SDL_Rect r;
+   // float speed;
+    float offset;
+}sprite;
+
 
 typedef struct segment{
 
@@ -64,23 +86,66 @@ typedef struct segment{
     int c;
     int index;
     int* colours;
+    sprite sprites[5];
+    int spritenum;
+    float clip;
 
 }segment;
 
-segment road_segments[1000];
+
+segment road_segments[CHUNK_SIZE*BUFFER_CHUNKS];
+int chunk_index= 0;
 int road_len = 0;
 int trackLen = 0;
 float position = 0;
 float cam_depth;
+float playerX = 0;
+float playerZ = 0;
+float speed = 0;
+float max_speed = (SEGMENT_LEN/0.0166666);
+
+int A_PRESSED = 0;
+int B_PRESSED = 0;
+int X_PRESSED = 0;
+int LEFT_PRESSED = 0;
+int RIGHT_PRESSED = 0;
+
+
+sprite car;
+
+SDL_Texture* billboard;
+
+float increase(float x,float incr, float max, float min){
+    x += incr;
+        while(x>=max){
+            x-=max;
+        }
+        while(x<min){
+            x += max;
+        }
+
+    return x;
+}
 
 float lastY(){
     return (road_len == 0)?0:road_segments[road_len-1].p2.world.y;
 }
 
+void addSprite(int segi,SDL_Texture* t,float offset){
+    segment* s = &road_segments[segi];
+    if(s->spritenum < 5){
+        sprite sp;
+        sp.t = t;
+        sp.offset = offset;
+        s->sprites[s->spritenum] = sp;
+        s->spritenum = s->spritenum+1;
+        printf("sprite added %d to %d\n",s->spritenum,s->index);
+    }
+}
+
 void addSegment(int c,float y){
     
     segment s;
-    printf("y: %f",y);
     s.index = road_len;
     s.p1.world = zero;
     s.p1.world.y = lastY();
@@ -90,6 +155,7 @@ void addSegment(int c,float y){
     s.p2.world.z = (road_len+1)*SEGMENT_LEN;
     s.c = c;
     s.colours = ((road_len/RUMBLE_LEN)%2 ? colours_DARK : colours_LIGHT);
+    s.spritenum = 0;
     road_segments[road_len] = s;
     road_len++;
 }
@@ -111,7 +177,11 @@ void addRoad(float enter,float hold,float leave, int curve,float y){
 
 void addSCurves(){
     addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_EASY,HILL_LOW);
-    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_EASY,HILL_MEDIUM);
+    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
+    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_HARD,HILL_HIGH);
+    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
+    addRoad(LEN_MEDIUM,LEN_MEDIUM,LEN_MEDIUM,CURVE_HARD,HILL_LOW);
+
      trackLen = road_len * SEGMENT_LEN;
 }
 
@@ -150,11 +220,29 @@ void project_point(point* p,int camx, int camy, int camz){
     p->camera.y = (p->world.y ) - camy;
     p->camera.z = (p->world.z ) - camz;
 
-    float screen_scale = cam_depth/p->camera.z;
-    p->screen.x = round((WINDOW_WIDTH/2) + (screen_scale *  p->camera.x * WINDOW_WIDTH/2));
-    p->screen.y = round((WINDOW_HEIGHT/2) - (screen_scale * p->camera.y  * WINDOW_HEIGHT/2));
+    p->screenscale = cam_depth/p->camera.z;
+    p->screen.x = round((WINDOW_WIDTH/2) + (p->screenscale *  p->camera.x * WINDOW_WIDTH/2));
+    p->screen.y = round((WINDOW_HEIGHT/2) - (p->screenscale * p->camera.y  * WINDOW_HEIGHT/2));
    // p->screen.y = p->screen.y < 0 ? 0 : p->screen.y;
-    p->screen.z = round((screen_scale * ROAD_WIDTH * WINDOW_WIDTH/2));
+    p->screen.z = round((p->screenscale * ROAD_WIDTH * WINDOW_WIDTH/2));
+
+}
+
+void render_sprite(SDL_Renderer* rend, SDL_Texture* tex, float scale, float destX, float destY, float w, float h, float xOffset, float yOffset,float clip){
+    
+    float destW = (w*scale*(float)WINDOW_WIDTH/2) * ((0.3 * 1/270) * ROAD_WIDTH); 
+    float destH = (h*scale*(float)WINDOW_WIDTH/2) * ((0.3 * 1/270) * ROAD_WIDTH); 
+    destX = destX + (xOffset * destW);
+    destY = destY + (yOffset * destH);
+
+    float clipH = clip ? ( 0 > destY + destH - clip ? 0 : destY + destH - clip) : 0;
+    if(clipH < destH){
+        SDL_Rect r = {destX,destY,destW,destH};
+        SDL_RenderCopy(rend, tex, NULL, &r);
+
+    }
+    
+
 
 }
 
@@ -193,47 +281,87 @@ void render_lanes(segment s,SDL_Renderer* rend){
     }
 }
 
+void render_background(SDL_Renderer* rend){
+
+
+   // SDL_RenderCopy(rend,sky.t,NULL,&(sky.r));
+   // SDL_RenderCopy(rend,hills.t,NULL,&(hills.r));
+   // SDL_RenderCopy(rend,trees.t,NULL,&(trees.r));
+}
+
+void render_player(SDL_Renderer* rend){
+    float bounce = (1.5 * (1/SDL_GetPerformanceCounter()) * speed/max_speed *(4/3));
+    
+    render_sprite(rend,car.t,(float)cam_depth/playerZ,WINDOW_WIDTH/2,WINDOW_HEIGHT,270,70,-0.5,-1,0);
+}
+
 void render(SDL_Renderer* rend){
 
     SDL_SetRenderDrawColor(rend, 0, 0, 255, 255);
     SDL_RenderClear(rend);
 
+   // render_background(rend);
+
     segment first_segment = find_segment(position);
     float first_percent = percentRemaining((int)position,SEGMENT_LEN);
     float playerY = interpolate(first_segment.p1.world.y,first_segment.p2.world.y,first_percent);
 
-    printf("firstsegmetn: %d\n",first_segment.index);
     float dx = -(first_segment.c * first_percent);
     float x = 0;
 
     float maxy = WINDOW_HEIGHT;
     int i;
     for(i=0;i<DRAW_DISTANCE;i++){
-        segment s = road_segments[(first_segment.index+i)%road_len];
+        segment* s = &road_segments[(first_segment.index+i)%road_len];
        // printf("drawing segment %d at y%f\n",s.index,s.p2.world.y);
 
-        project_point(&s.p1,(0*ROAD_WIDTH)-x,CAM_HEIGHT+playerY,position - (s.index<first_segment.index? trackLen:0));
-        project_point(&s.p2,(0*ROAD_WIDTH)-x-dx,CAM_HEIGHT+playerY,position - (s.index<first_segment.index? trackLen:0));
+        project_point(&s->p1,(playerX*ROAD_WIDTH)-x,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? trackLen:0));
+        project_point(&s->p2,(playerX*ROAD_WIDTH)-x-dx,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? trackLen:0));
 
         x+=dx;
-        dx+=s.c;
+        dx+=s->c;
 
-        if (!((s.p1.camera.z <= cam_depth) ||(s.p2.screen.y >= maxy))){
+        if (!((s->p1.camera.z <= cam_depth) ||(s->p2.screen.y >= maxy))){
 
-            boxColor(rend,0, s.p2.screen.y, WINDOW_WIDTH,s.p1.screen.y,s.colours[0]);
-            Sint16 xs[4] = {s.p1.screen.x -s.p1.screen.z ,s.p1.screen.x+s.p1.screen.z ,
-                         s.p2.screen.x+s.p2.screen.z ,s.p2.screen.x - s.p2.screen.z };
-            Sint16 ys[4] = {s.p1.screen.y,s.p1.screen.y,
-                         s.p2.screen.y,s.p2.screen.y};
-            filledPolygonColor(rend,xs,ys,4,s.colours[1]);
+            boxColor(rend,0, s->p2.screen.y, WINDOW_WIDTH,s->p1.screen.y,s->colours[0]);
+            Sint16 xs[4] = {s->p1.screen.x -s->p1.screen.z ,s->p1.screen.x+s->p1.screen.z ,
+                         s->p2.screen.x+s->p2.screen.z ,s->p2.screen.x - s->p2.screen.z };
+            Sint16 ys[4] = {s->p1.screen.y,s->p1.screen.y,
+                         s->p2.screen.y,s->p2.screen.y};
+            filledPolygonColor(rend,xs,ys,4,s->colours[1]);
             
-            render_rumble(s,rend);
-            render_lanes(s,rend);
+            render_rumble(*s,rend);
+            render_lanes(*s,rend);
             
-            maxy = s.p2.screen.y;
-        }         
+            maxy = s->p2.screen.y;
+            s->clip = maxy;
+        }       
 
     }
+
+
+    for(i = (DRAW_DISTANCE-1) ; i > 0; i--){
+        segment* s = &road_segments[(first_segment.index+i)%road_len];
+      
+        int j;
+        for(j=0;j<s->spritenum; j++){
+            float sx = 0,sy = 0;
+            float spritescale = cam_depth/(float)s->p1.camera.z;
+
+            //printf("sx: %f, sy: %f, scale: %F, offset %f\n",s.p1.screen.x,s.p1.screen.y,spritescale,s.sprites[j].offset);
+
+            sx = s->p1.screen.x + ((spritescale) * (s->sprites[j].offset) * ROAD_WIDTH * WINDOW_WIDTH/2);
+            sy = s->p1.screen.y;
+            int sw = 0,sh = 0;
+            SDL_QueryTexture(s->sprites[j].t, NULL, NULL, &sw, &sh);
+           
+            render_sprite(rend,s->sprites[j].t,spritescale,sx,sy,(float)sw,(float)sh,(s->sprites[j].offset < 0 ? -1 : 0),-1,s->clip);
+            
+        }
+    }
+
+
+    render_player(rend);
     //printf("alllsegdrawn\n");
     //draw background sky
     SDL_RenderPresent(rend);
@@ -253,18 +381,43 @@ int main(int argc, char *argv[])
     );
 
     SDL_Renderer * renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    car.t = IMG_LoadTexture(renderer,"res/car.png");
+    billboard = IMG_LoadTexture(renderer, "res/billboard.png");
+
 
     SDL_Rect square = {216, 96, 34, 64}; 
-
+    SDL_Rect r; r.x = 0; r.y = 0; r.w = WINDOW_WIDTH; r.h = WINDOW_HEIGHT/2;
+    
+   
     //reset_road();
 
     cam_depth = 1 / ( tanf((FOV/2)/(180/M_PI)) );
+     playerZ = (float)CAM_HEIGHT*cam_depth;
     addSCurves();
+
+    addSprite(5,  billboard, -1);
+    addSprite(60,  billboard, -1);
+    addSprite(60,  billboard, 1);
+    addSprite(300,  billboard, -1);
     int running = 1;
+    int dir = 0;
+    int acc = 0;
+    float drift_tightness = 0;
+    float drift_factor = 0;
+    float drift_angle = 0;
+    Uint64 NOW = SDL_GetPerformanceCounter();
+    Uint64 LAST = 0;
+    float dt = 0;
+    printf("max speed %f\n",max_speed);
+
     SDL_Event event;
     while (running) { 
-        Uint64 start = SDL_GetPerformanceCounter();
-        // Process input
+
+        LAST = NOW;
+        NOW = SDL_GetPerformanceCounter();
+
+        dt = (float)((NOW - LAST) * 1000/(double)SDL_GetPerformanceFrequency());
+        dt*=0.001;
         if (SDL_PollEvent(&event)) {
             switch (event.type) {
                 case SDL_QUIT:
@@ -280,28 +433,92 @@ int main(int argc, char *argv[])
                         // Close the program if start is pressed
                         running = 0;
                     }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+                        LEFT_PRESSED = 1;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+                        RIGHT_PRESSED = 1;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_A) {
+                        A_PRESSED = 1;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_B) {
+                        B_PRESSED = 1;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_X) {
+                        X_PRESSED = 1;
+                    }
+                    break;
+                case SDL_CONTROLLERBUTTONUP:
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+                        LEFT_PRESSED = 0;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+                        RIGHT_PRESSED = 0;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_A) {
+                        A_PRESSED = 0;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_B) {
+                        B_PRESSED = 0;
+                    }
+                    if(event.cbutton.button == SDL_CONTROLLER_BUTTON_X) {
+                        X_PRESSED = 0;
+                    }
                     break;
             }
         }
 
-        // Clear the screen
+        segment playerSegment = find_segment(position+playerZ);
+        position = increase(position,dt*speed,trackLen,0);
+
+        
+
+        float dx = dt * 2 * (speed/max_speed);
+        
+        
+        if(LEFT_PRESSED){
+                playerX = playerX  -  dx;
+        }
+        if(RIGHT_PRESSED){
+            playerX = playerX  +  dx;
+        }
+        
+        if(X_PRESSED){
+            speed = speed + ((-max_speed)*dt);
+        }else if(B_PRESSED){
+            speed = speed + ((-max_speed/2)*dt);
+        }
+        else if(A_PRESSED){
+            speed = speed + ((max_speed /5)*dt);
+        }
+        else{
+            speed = speed + ((-max_speed/5)*dt);
+        }
+
+
+        playerX = playerX - (dx * (speed/max_speed) * playerSegment.c * CENTRIFUGAL);
+       
+        speed = speed > max_speed ? max_speed : speed;
+        speed = speed < 0 ? 0 : speed;
+        //speed *= drift_tightness
+
+        if (((playerX < -1) || (playerX > 1)) && (speed > max_speed/4))
+            speed = speed + (-max_speed/2* dt);
+
+        //player can drift by pressing X and counter steering agaisnt a curve.
+
+        
+
+     
         render(renderer);
-        
-        position+=SPEED;
-        while(position>=trackLen){
-            position-=trackLen;
-        }
-        while(position<0){
-            position += trackLen;
-        }
-        
 
 
-        Uint64 end = SDL_GetPerformanceCounter();
+      //  Uint64 END = SDL_GetPerformanceCounter();
 
-	    float elapsedMS = (end - start) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
+	   // float elapsedMS = (END - NOW) / (float)SDL_GetPerformanceFrequency() * 1000.0f;
 
-        SDL_Delay(floor(16.666f - elapsedMS));
+       // SDL_Delay(floor(16.666f - elapsedMS));
 
     }
     SDL_DestroyRenderer(renderer);

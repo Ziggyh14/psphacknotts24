@@ -12,6 +12,7 @@ pkg_search_module(SDL2_IMAGE REQUIRED SDL2_image)
 pkg_search_module(SDL2_GFX REQUIRED SDL2_gfx)
 
 find_package(SDL2_gfx)
+find_package(SDL2_image)
 
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -40,8 +41,8 @@ if(PSP)
         TITLE ${PROJECT_NAME}
         VERSION 01.00
     )
-else(set(CMAKE_C_COMPILER "/usr/bin/gcc")
-    set(CMAKE_C_STANDARD "90")
-    set(CMAKE_C_STANDARD_REQUIRED YES))
+# else(set(CMAKE_C_COMPILER "/usr/bin/gcc")
+#    set(CMAKE_C_STANDARD "90")
+#   set(CMAKE_C_STANDARD_REQUIRED YES))
 endif()
 
