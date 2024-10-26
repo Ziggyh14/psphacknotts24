@@ -96,9 +96,10 @@ typedef struct segment{
 }segment;
 
 
-segment road_segments[CHUNK_SIZE*10000];
+segment road_segments[CHUNK_SIZE*BUFFER_CHUNKS];
 int chunk_index= 0;
-int road_len = 0;
+int seg_index=0;
+int road_len =0;
 int trackLen = 0;
 float position = 0;
 float cam_depth;
@@ -132,7 +133,12 @@ float increase(float x,float incr, float max, float min){
 }
 
 float lastY(){
-    return (road_len == 0)?0:road_segments[road_len-1].p2.world.y;
+    float r;
+    if(road_len == 0) return 0;
+    if(chunk_index = 0&&seg_index ==0){
+        return road_segments[(BUFFER_CHUNKS*CHUNK_SIZE)-1].p2.world.y;
+    }
+    return road_segments[(chunk_index*100)+seg_index-1].p2.world.y;
 }
 
 void addSprite(int segi,SDL_Texture* t,float offset){
@@ -163,11 +169,12 @@ void addSegment(int c,float y,int i){
     s.checkpoint = 0;
     road_segments[i] = s;
     road_len++;
+    seg_index = (seg_index+1)%CHUNK_SIZE;
 }
 
 void addChunk(float enter,float hold,float leave, int curve,float y){
     
-    if(enter+hold+leave != 100){
+    if(enter+hold+leave != CHUNK_SIZE){
         return;
     }
     float startY = lastY();
@@ -180,15 +187,14 @@ void addChunk(float enter,float hold,float leave, int curve,float y){
         addSegment(curve,easeInOut(startY,endY,(enter+(float)i)/total),(chunk_index*100)+i+enter);}
     for(i = 0; i<leave;i++){
         addSegment(easeInOut(curve,0,i/leave),easeInOut(startY,endY,(enter+hold+(float)i)/total),(chunk_index*100)+i+enter+hold);}
-    chunk_index = (chunk_index + 1);
+    chunk_index = (chunk_index + 1)%BUFFER_CHUNKS;
     
 }
 
 void addGenRoad(){
 
-    for(int i = 0; i<5000;i++){
+    for(int i = 0; i<BUFFER_CHUNKS;i++){
         addChunk(LEN_MEDIUM,LEN_SHORT,LEN_SHORT,CURVE_EASY,HILL_LOW);
-        addChunk(LEN_SHORT,LEN_MEDIUM,LEN_SHORT,-CURVE_MEDIUM,HILL_MEDIUM);
     }
 
     trackLen = road_len * SEGMENT_LEN;
