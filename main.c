@@ -553,7 +553,7 @@ int main(int argc, char *argv[])
 
         segment firstSegment = find_segment(position);
         printf("firstsegment %d\n",firstSegment.index);
-        if(((chunk_index)*100)+100<firstSegment.index-101){
+        if(((chunk_index)*100)+100<firstSegment.index){
             printf("chunk index%d\n",chunk_index);
             addChunk(LEN_SHORT,LEN_SHORT,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
             printf("gen chunk at index %d\n",chunk_index-1);
