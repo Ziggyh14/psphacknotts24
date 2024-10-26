@@ -188,6 +188,7 @@ void addChunk(float enter,float hold,float leave, int curve,float y){
     for(i = 0; i<leave;i++){
         addSegment(easeInOut(curve,0,i/leave),easeInOut(startY,endY,(enter+hold+(float)i)/total),(chunk_index*100)+i+enter+hold);}
     chunk_index = (chunk_index + 1)%BUFFER_CHUNKS;
+    trackLen+=CHUNK_SIZE*SEGMENT_LEN;
     
 }
 
@@ -197,7 +198,6 @@ void addGenRoad(){
         addChunk(LEN_MEDIUM,LEN_SHORT,LEN_SHORT,CURVE_EASY,HILL_LOW);
     }
 
-    trackLen = road_len * SEGMENT_LEN;
 }
 
 void addCheckpoint(int i,float time_added){
@@ -230,7 +230,6 @@ void reset_road(){
         road_len++;
     }
 
-    trackLen = road_len * SEGMENT_LEN;
 }
 
 segment find_segment(float z){
