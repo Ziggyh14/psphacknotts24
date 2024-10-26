@@ -8,7 +8,7 @@
 #define RUMBLE_LEN 3
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
-#define DRAW_DISTANCE 300
+#define DRAW_DISTANCE 200
 #define ROAD_WIDTH 2000
 #define CAM_HEIGHT 1000
 #define FOV 100
@@ -107,6 +107,7 @@ float playerX = 0;
 float playerZ = 0;
 float playerW = 0;
 float speed = 0;
+int loops = 0;
 float max_speed = (SEGMENT_LEN/0.0166666);
 
 int A_PRESSED = 0;
@@ -135,7 +136,7 @@ float increase(float x,float incr, float max, float min){
 float lastY(){
     float r;
     if(road_len == 0) return 0;
-    if(chunk_index = 0&&seg_index ==0){
+    if(chunk_index == 0&&seg_index ==0){
         return road_segments[(BUFFER_CHUNKS*CHUNK_SIZE)-1].p2.world.y;
     }
     return road_segments[(chunk_index*100)+seg_index-1].p2.world.y;
@@ -169,6 +170,7 @@ void addSegment(int c,float y,int i){
     s.checkpoint = 0;
     road_segments[i] = s;
     road_len++;
+   // trackLen+=SEGMENT_LEN;
     seg_index = (seg_index+1)%CHUNK_SIZE;
 }
 
@@ -177,18 +179,31 @@ void addChunk(float enter,float hold,float leave, int curve,float y){
     if(enter+hold+leave != CHUNK_SIZE){
         return;
     }
+    printf("GEN CHUNK %d\n",chunk_index);
     float startY = lastY();
+    printf("%d\n",chunk_index);
     float endY = startY + (y*SEGMENT_LEN);
+    printf("end%d\n",chunk_index);
     float total =enter+hold+leave;
+    printf("end%d\n",chunk_index);
     int i;
+    printf("end%d\n",chunk_index);
     for(i = 0;i<enter;i++){
         addSegment(easeIn(0,curve,i/enter),easeInOut(startY,endY,(float)i/total),(chunk_index*100)+i);}
+    printf("end%d\n",chunk_index);
     for(i = 0; i<hold;i++){
         addSegment(curve,easeInOut(startY,endY,(enter+(float)i)/total),(chunk_index*100)+i+enter);}
+    printf("end%d\n",chunk_index);
     for(i = 0; i<leave;i++){
         addSegment(easeInOut(curve,0,i/leave),easeInOut(startY,endY,(enter+hold+(float)i)/total),(chunk_index*100)+i+enter+hold);}
-    chunk_index = (chunk_index + 1)%BUFFER_CHUNKS;
-    trackLen+=CHUNK_SIZE*SEGMENT_LEN;
+    printf("end%d\n",chunk_index);
+    chunk_index++;
+
+    chunk_index%=5;
+    trackLen+=CHUNK_SIZE * SEGMENT_LEN;
+    printf("tracklen %d\n",trackLen);
+    loops++;
+    
     
 }
 
@@ -196,8 +211,10 @@ void addGenRoad(){
 
     for(int i = 0; i<BUFFER_CHUNKS;i++){
         addChunk(LEN_MEDIUM,LEN_SHORT,LEN_SHORT,CURVE_EASY,HILL_LOW);
+        printf("outside for%d\n",chunk_index);
+        
     }
-
+   // trackLen = BUFFER_CHUNKS*CHUNK_SIZE*SEGMENT_LEN;
 }
 
 void addCheckpoint(int i,float time_added){
@@ -209,31 +226,8 @@ void addCheckpoint(int i,float time_added){
 
 }
 
-void reset_road(){
-    int i;
-    
-    for (i = 0; i<500; i++){
-        segment s;
-        point p1;
-        p1.world = zero;
-        p1.world.z = i*SEGMENT_LEN;
-
-        s.p1 = p1;
-        point p2;
-        p2.world = zero;
-        p2.world.z = (i+1)*SEGMENT_LEN;
-
-        s.p2 = p2;
-        s.colours = ((i/RUMBLE_LEN)%2 ? colours_DARK : colours_LIGHT);
-        s.index = i;
-        road_segments[i] = s;
-        road_len++;
-    }
-
-}
-
 segment find_segment(float z){
-    return road_segments[(int)(z/SEGMENT_LEN) % road_len];
+    return road_segments[(int)(z/SEGMENT_LEN) % (CHUNK_SIZE*BUFFER_CHUNKS)];
     
 }
 
@@ -335,12 +329,14 @@ void render(SDL_Renderer* rend){
 
     float maxy = WINDOW_HEIGHT;
     int i;
+    //printf("first segment index %d\n",first_segment.index);
     for(i=0;i<DRAW_DISTANCE;i++){
-        segment* s = &road_segments[(first_segment.index+i)%road_len];
-       // printf("drawing segment %d at y%f\n",s.index,s.p2.world.y);
+        segment* s = &road_segments[(first_segment.index+i)%(BUFFER_CHUNKS*CHUNK_SIZE)];
+         
+       // printf("drawing segment %d at world z%f\n",s->index,s->p2.world.z);
 
-        project_point(&s->p1,(playerX*ROAD_WIDTH)-x,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? trackLen:0));
-        project_point(&s->p2,(playerX*ROAD_WIDTH)-x-dx,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? trackLen:0));
+        project_point(&s->p1,(playerX*ROAD_WIDTH)-x,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? 0:0));
+        project_point(&s->p2,(playerX*ROAD_WIDTH)-x-dx,CAM_HEIGHT+playerY,position - (s->index<first_segment.index? 0:0));
 
         x+=dx;
         dx+=s->c;
@@ -363,9 +359,11 @@ void render(SDL_Renderer* rend){
 
     }
 
+   
+
 
     for(i = (DRAW_DISTANCE-1) ; i > 0; i--){
-        segment* s = &road_segments[(first_segment.index+i)%road_len];
+        segment* s = &road_segments[(first_segment.index+i)%(BUFFER_CHUNKS*CHUNK_SIZE)];
       
         int j;
         for(j=0;j<s->spritenum; j++){
@@ -383,7 +381,6 @@ void render(SDL_Renderer* rend){
             
         }
     }
-
 
     render_player(rend);
     //printf("alllsegdrawn\n");
@@ -420,7 +417,7 @@ int main(int argc, char *argv[])
     //reset_road();
 
     cam_depth = 1 / ( tanf((FOV/2)/(180/M_PI)) );
-     playerZ = (float)CAM_HEIGHT*cam_depth;
+    playerZ = (float)CAM_HEIGHT*cam_depth;
     addGenRoad();
     addCheckpoint(100,100);
    // printf("roads gened\n");
@@ -500,13 +497,13 @@ int main(int argc, char *argv[])
         }
 
         segment playerSegment = find_segment(position+playerZ);
-        position = increase(position,dt*speed,trackLen,0);
+        position = increase(position,dt*speed,INFINITY,0);
 
         if(playerSegment.checkpoint){
             time+=playerSegment.timeadded;
             road_segments[playerSegment.index].checkpoint = 0;
         }
-        printf("time: %f\n",time);
+        //printf("time: %f\n",time);
 
         
 
@@ -555,9 +552,11 @@ int main(int argc, char *argv[])
         }
 
         segment firstSegment = find_segment(position);
-        printf("firssegmetn: %d\n",firstSegment.index);
-        if((chunk_index+2)*100<firstSegment.index){
+        printf("firstsegment %d\n",firstSegment.index);
+        if(((chunk_index)*100)+100<firstSegment.index-101){
+            printf("chunk index%d\n",chunk_index);
             addChunk(LEN_SHORT,LEN_SHORT,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
+            printf("gen chunk at index %d\n",chunk_index-1);
         }
 
         render(renderer);
