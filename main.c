@@ -42,7 +42,7 @@
 
 #define CENTRIFUGAL 0.5
 
-#define CARS_NUM 200
+#define CARS_NUM 5
 
 #define easeIn(a,b,p) (a+(b-a)*powf(p,2))
 #define easeOut(a,b,p) (a+(b-a)*(1-powf(1-p,2)))
@@ -393,7 +393,7 @@ void render(SDL_Renderer* rend){
             
             maxy = s->p2.screen.y;
             //s->clip = s->p2.screen.y;
-            printf("maxy %f\n",maxy);
+          //  printf("maxy %f\n",maxy);
         }       
 
     }
@@ -403,7 +403,7 @@ void render(SDL_Renderer* rend){
       
         int j;
         for(j=0;j<s->spritenum; j++){
-            printf("drawing sprite max y %f\n",s->p2.screen.y);
+           // printf("drawing sprite max y %f\n",s->p2.screen.y);
             float sx = 0,sy = 0;
             float spritescale = cam_depth/(float)s->p1.camera.z;
 
@@ -419,6 +419,7 @@ void render(SDL_Renderer* rend){
         }
 
         for(j=0; j< s->cari ;j++){
+            
             Car c = s->cars[j];
             sprite sp = c.s;
             float scale = interpolate(cam_depth/(float)s->p1.camera.z,cam_depth/(float)s->p2.camera.z,c.p);
@@ -476,7 +477,7 @@ int main(int argc, char *argv[])
     addSprite(300,  billboard, -1);
     addSprite(300,  billboard, 1);
     addSprite(350,  billboard, -1);
-    genCars(50);
+    genCars(5);
     int running = 1;
     int dir = 0;
     int acc = 0;
@@ -487,7 +488,6 @@ int main(int argc, char *argv[])
     Uint64 NOW = SDL_GetPerformanceCounter();
     Uint64 LAST = 0;
     float dt = 0;
-    printf("max speed %f\n",max_speed);
 
     SDL_Event event;
     while (running) { 
@@ -605,12 +605,31 @@ int main(int argc, char *argv[])
         
 
         segment firstSegment = find_segment(position);
-        printf("firstsegment %d\n",firstSegment.index);
+       // printf("firstsegment %d\n",firstSegment.index);
         if(((chunk_index)*100)+100<firstSegment.index || ((chunk_index >= 4 ? 1 : 0) && firstSegment.index<400-DRAW_DISTANCE)){
-            printf("chunk index%d\n",chunk_index);
+           // printf("chunk index%d\n",chunk_index);
             addChunk(LEN_SHORT,LEN_SHORT,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
-            printf("gen chunk at index %d\n",chunk_index-1);
+            //printf("gen chunk at index %d\n",chunk_index-1);
         }
+
+
+        for(int i = 0; i<CARS_NUM;i++){
+            Car c = cars[i];
+            segment olds = find_segment(c.z);
+            c.z = increase(c.z,dt*c.speed,trackLen,0);
+          //  c.p = percentRemaining((int)c.z,SEGMENT_LEN);
+            segment news = find_segment(c.z);
+            if(olds.index!=news.index){
+                news.cars[news.cari] = c;
+                news.cari++;
+                road_segments[news.index] = news;
+                
+                olds.cari--;
+                road_segments[olds.index] = olds;
+            }
+            cars[i] = c;
+        }
+
 
         render(renderer);
 
