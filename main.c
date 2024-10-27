@@ -40,7 +40,9 @@
 #define BRAKE -1
 #define DECEL 0
 
-#define CENTRIFUGAL 0.3
+#define CENTRIFUGAL 0.5
+
+#define CARS_NUM 200
 
 #define easeIn(a,b,p) (a+(b-a)*powf(p,2))
 #define easeOut(a,b,p) (a+(b-a)*(1-powf(1-p,2)))
@@ -79,6 +81,17 @@ typedef struct sprite{
     float offset;
 }sprite;
 
+typedef struct Car
+{
+    sprite s;
+    float z;
+    float speed;
+    int segment;
+    float p;
+
+}Car;
+
+
 
 typedef struct segment{
 
@@ -88,6 +101,8 @@ typedef struct segment{
     int index;
     int* colours;
     sprite sprites[5];
+    Car cars[10];
+    int cari;
     int spritenum;
     float clip;
     float timeadded;
@@ -97,6 +112,8 @@ typedef struct segment{
 
 
 segment road_segments[CHUNK_SIZE*BUFFER_CHUNKS];
+Car cars[CARS_NUM];
+int car_index;
 int chunk_index= 0;
 int seg_index=0;
 int road_len =0;
@@ -117,9 +134,10 @@ int LEFT_PRESSED = 0;
 int RIGHT_PRESSED = 0;
 
 
-sprite car;
+sprite player;
 
 SDL_Texture* billboard;
+SDL_Texture* cartex;
 
 float increase(float x,float incr, float max, float min){
     x += incr;
@@ -168,6 +186,8 @@ void addSegment(int c,float y,int i){
     s.colours = ((road_len/RUMBLE_LEN)%2 ? colours_DARK : colours_LIGHT);
     s.spritenum = 0;
     s.checkpoint = 0;
+    s.clip = 0;
+    s.cari =0;
     road_segments[i] = s;
     road_len++;
    // trackLen+=SEGMENT_LEN;
@@ -211,8 +231,6 @@ void addGenRoad(){
 
     for(int i = 0; i<BUFFER_CHUNKS;i++){
         addChunk(LEN_MEDIUM,LEN_SHORT,LEN_SHORT,CURVE_EASY,HILL_LOW);
-        printf("outside for%d\n",chunk_index);
-        
     }
    // trackLen = BUFFER_CHUNKS*CHUNK_SIZE*SEGMENT_LEN;
 }
@@ -223,12 +241,32 @@ void addCheckpoint(int i,float time_added){
     s->colours = colours_CHECKPOINT;
     s->checkpoint = 1;
     s->timeadded = time_added;
+}
 
+void genCars(int n){
+    for(int i = 0; i< n; i++){
+        addCar();
+    }
 }
 
 segment find_segment(float z){
     return road_segments[(int)(z/SEGMENT_LEN) % (CHUNK_SIZE*BUFFER_CHUNKS)];
     
+}
+
+void addCar(){
+    srand(SDL_GetPerformanceCounter());
+    Car c;
+    c.s.offset = (rand()%9)*0.1;
+    c.z = (rand()%(CHUNK_SIZE*BUFFER_CHUNKS))*SEGMENT_LEN;
+    c.s.t = cartex;
+    c.speed = max_speed/4;
+    segment seg;
+    seg = find_segment(c.z);
+    seg.cars[seg.cari++] = c;
+    road_segments[seg.index] = seg;
+    cars[car_index] = c;
+    car_index = (car_index + 1) % CARS_NUM;
 }
 
 
@@ -310,7 +348,7 @@ void render_background(SDL_Renderer* rend){
 void render_player(SDL_Renderer* rend){
     float bounce = (1.5 * (1/SDL_GetPerformanceCounter()) * speed/max_speed *(4/3));
     playerW = (442*(float)cam_depth/playerZ*(float)WINDOW_WIDTH/2) * ((0.3 * 1/270) * ROAD_WIDTH);
-    render_sprite(rend,car.t,(float)cam_depth/playerZ,WINDOW_WIDTH/2,WINDOW_HEIGHT,442,304,-0.5,-1,0);
+    render_sprite(rend,player.t,(float)cam_depth/playerZ,WINDOW_WIDTH/2,WINDOW_HEIGHT,442,304,-0.5,-1,0);
 }
 
 void render(SDL_Renderer* rend){
@@ -354,19 +392,18 @@ void render(SDL_Renderer* rend){
             render_lanes(*s,rend);
             
             maxy = s->p2.screen.y;
-            s->clip = maxy;
+            //s->clip = s->p2.screen.y;
+            printf("maxy %f\n",maxy);
         }       
 
     }
-
-   
-
 
     for(i = (DRAW_DISTANCE-1) ; i > 0; i--){
         segment* s = &road_segments[(first_segment.index+i)%(BUFFER_CHUNKS*CHUNK_SIZE)];
       
         int j;
         for(j=0;j<s->spritenum; j++){
+            printf("drawing sprite max y %f\n",s->p2.screen.y);
             float sx = 0,sy = 0;
             float spritescale = cam_depth/(float)s->p1.camera.z;
 
@@ -377,10 +414,23 @@ void render(SDL_Renderer* rend){
             int sw = 0,sh = 0;
             SDL_QueryTexture(s->sprites[j].t, NULL, NULL, &sw, &sh);
            
-            render_sprite(rend,s->sprites[j].t,spritescale,sx,sy,(float)sw,(float)sh,(s->sprites[j].offset < 0 ? -1 : 0),-1,s->clip);
+            render_sprite(rend,s->sprites[j].t,spritescale,sx,sy,(float)sw,(float)sh,(s->sprites[j].offset < 0 ? -1 : 0),-1,s->p2.screen.y);
+            
+        }
+
+        for(j=0; j< s->cari ;j++){
+            Car c = s->cars[j];
+            sprite sp = c.s;
+            float scale = interpolate(cam_depth/(float)s->p1.camera.z,cam_depth/(float)s->p2.camera.z,c.p);
+            float sx = interpolate(s->p1.screen.x,s->p2.screen.x,c.p) + (scale*c.s.offset*ROAD_WIDTH*WINDOW_WIDTH/2);
+            float sy = interpolate(s->p1.screen.y,s->p2.screen.y,c.p);
+            int sw = 0,sh = 0;
+            SDL_QueryTexture(sp.t, NULL, NULL, &sw, &sh);
+            render_sprite(rend,sp.t,scale,sx,sy,sw,sh,-0.5,-1,s->p2.screen.y);
             
         }
     }
+    
 
     render_player(rend);
     //printf("alllsegdrawn\n");
@@ -406,15 +456,14 @@ int main(int argc, char *argv[])
     );
 
     SDL_Renderer * renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-    car.t = IMG_LoadTexture(renderer,"res/car.png");
+    player.t = IMG_LoadTexture(renderer,"res/car.png");
     billboard = IMG_LoadTexture(renderer, "res/billboard.png");
+    cartex = IMG_LoadTexture(renderer, "res/car.png");
 
 
     SDL_Rect square = {216, 96, 34, 64}; 
     SDL_Rect r; r.x = 0; r.y = 0; r.w = WINDOW_WIDTH; r.h = WINDOW_HEIGHT/2;
     
-   
-    //reset_road();
 
     cam_depth = 1 / ( tanf((FOV/2)/(180/M_PI)) );
     playerZ = (float)CAM_HEIGHT*cam_depth;
@@ -425,6 +474,9 @@ int main(int argc, char *argv[])
     addSprite(60,  billboard, -1);
     addSprite(60,  billboard, 1);
     addSprite(300,  billboard, -1);
+    addSprite(300,  billboard, 1);
+    addSprite(350,  billboard, -1);
+    genCars(50);
     int running = 1;
     int dir = 0;
     int acc = 0;
@@ -550,10 +602,11 @@ int main(int argc, char *argv[])
             }
 
         }
+        
 
         segment firstSegment = find_segment(position);
         printf("firstsegment %d\n",firstSegment.index);
-        if(((chunk_index)*100)+100<firstSegment.index){
+        if(((chunk_index)*100)+100<firstSegment.index || ((chunk_index >= 4 ? 1 : 0) && firstSegment.index<400-DRAW_DISTANCE)){
             printf("chunk index%d\n",chunk_index);
             addChunk(LEN_SHORT,LEN_SHORT,LEN_MEDIUM,CURVE_MEDIUM,HILL_LOW);
             printf("gen chunk at index %d\n",chunk_index-1);
